@@ -76,6 +76,11 @@ type LabelRename struct {
 	Name    string
 }
 
+// regex to remove leading/training characters from numbers
+var (
+	regexNonNumberEnd = regexp.MustCompile("\\D+$")
+)
+
 func (lua *LuaSession) doLogin(response string) error {
 	urlParams := ""
 	if response != "" {
@@ -159,6 +164,7 @@ func (lua *LuaSession) LoadData(page LuaPage) ([]byte, error) {
 	callDone := false
 	var resp *http.Response
 	var err error
+	retries := 0
 	for !callDone {
 		// perform login if no SID or previous call failed with (403)
 		if lua.SID == "" || resp != nil {
@@ -194,9 +200,13 @@ func (lua *LuaSession) LoadData(page LuaPage) ([]byte, error) {
 			callDone = true
 		} else if resp.StatusCode == http.StatusForbidden && !callDone {
 			// we assume SID is expired, so retry login
+		} else if retries < 1 {
+			// unexpected error let's retry (reboot issue ?)
 		} else {
 			return nil, fmt.Errorf("%s failed: %s", page.Path, resp.Status)
 		}
+
+		retries++
 	}
 
 	body, err := ioutil.ReadAll(resp.Body)
@@ -310,8 +320,11 @@ VALUE:
 				floatVal = 0
 			}
 		} else {
-			// convert value to float
-			floatVal, err = strconv.ParseFloat(sVal, 64)
+			// convert value to float, but first remove all non numbers from begin or end of value
+			// needed if value contains unit
+			sNum := regexNonNumberEnd.ReplaceAllString(sVal, "")
+
+			floatVal, err = strconv.ParseFloat(sNum, 64)
 			if err != nil {
 				continue VALUE
 			}
